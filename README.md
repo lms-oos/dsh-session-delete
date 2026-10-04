@@ -15,22 +15,24 @@
 
 ---
 
-## 2. 安装（已在本机执行）
+## 2. 安装
+
+> 下文的 `<插件目录>` 指你放本仓库的位置（例如 `C:\src\dsh-session-delete`），`<备份目录>` 指任意备份位置，`<runtime>` 指 DSH 自带的运行时目录（内含 node 与 pnpm）。DSH home 默认在 `$env:USERPROFILE\.dsh`。
 
 ```powershell
-# 0) 备份（已执行，落在 D:\deepseek\backup\）
-Copy-Item 'C:\Users\Lenovo\.dsh\profiles\desktop\package.json' 'D:\deepseek\backup\profile-desktop-package.json'
-Copy-Item 'C:\Users\Lenovo\.dsh\profiles\desktop\pnpm-lock.yaml' 'D:\deepseek\backup\profile-desktop-pnpm-lock.yaml'
+# 0) 备份 profile 清单
+Copy-Item "$env:USERPROFILE\.dsh\profiles\desktop\package.json" '<备份目录>\profile-desktop-package.json'
+Copy-Item "$env:USERPROFILE\.dsh\profiles\desktop\pnpm-lock.yaml" '<备份目录>\profile-desktop-pnpm-lock.yaml'
 
 # 1) 把插件接进 profile（追加 link 依赖 + bundle 条目，其他字段与顺序不动）
-node D:\deepseek\dsh-session-delete\scripts\install-profile.mjs `
-     'C:\Users\Lenovo\.dsh\profiles\desktop' 'D:\deepseek\dsh-session-delete'
+node '<插件目录>\scripts\install-profile.mjs' `
+     "$env:USERPROFILE\.dsh\profiles\desktop" '<插件目录>'
 
-# 2) 安装（pnpm 11.7.0，exit=0）
-node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir 'C:\Users\Lenovo\.dsh\profiles\desktop' install
+# 2) 安装
+node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir "$env:USERPROFILE\.dsh\profiles\desktop" install
 ```
 
-结果：`profiles\desktop\node_modules\dsh-session-delete` 是指向 `D:\deepseek\dsh-session-delete` 的 **Junction**，12 个 bundle 里新增 `dsh-session-delete`，其余插件（better-sidebar / ego-browser / cost-meter / dshmarket / approval-gate / modsearch …）全部健在。
+结果：`profiles\desktop\node_modules\dsh-session-delete` 是指向 `<插件目录>` 的 **Junction**，profile 的 bundle 列表里新增 `dsh-session-delete`，其余插件（better-sidebar / ego-browser / cost-meter / dshmarket / approval-gate / modsearch …）全部健在。
 
 `cordis.patch.yml` 由包的 `dsh.bundle.patch` 声明，loader 会自动把 `session-delete` 条目插进 profile 树，**无需手工改 `cordis.yml`**。
 
@@ -43,19 +45,21 @@ node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir 'C:\Users\Lenovo\.dsh\
    - 建议先拿一条不重要的对话试（或新建一条、发一句话、再删掉它）。
    - 客户端半由 `/plugins` 惰性装载，若宿主已加载而菜单没出现，刷新一次 GUI 页面即可。
 
+> 实测补充：开发这台机器上宿主半是在**不重启**的情况下生效的——安装后约一分钟，`profiles\desktop\cordis.yml` 被重新组合、`session-delete` 进了树，随后请求 `/session-delete/api/delete` 已由本插件处理（返回 400/404，而路由不存在时是兜底响应）。若你的环境没有这种热重载，重启即可。
+
 ## 4. 回滚
 
 ```powershell
 # 方式一：脚本反做（移除 link 依赖与 bundle 条目）
-node D:\deepseek\dsh-session-delete\scripts\install-profile.mjs --revert 'C:\Users\Lenovo\.dsh\profiles\desktop'
-node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir 'C:\Users\Lenovo\.dsh\profiles\desktop' install
+node '<插件目录>\scripts\install-profile.mjs' --revert "$env:USERPROFILE\.dsh\profiles\desktop"
+node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir "$env:USERPROFILE\.dsh\profiles\desktop" install
 
 # 方式二：直接还原备份（最保险）
-Copy-Item 'D:\deepseek\backup\profile-desktop-package.json' 'C:\Users\Lenovo\.dsh\profiles\desktop\package.json' -Force
-node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir 'C:\Users\Lenovo\.dsh\profiles\desktop' install
+Copy-Item '<备份目录>\profile-desktop-package.json' "$env:USERPROFILE\.dsh\profiles\desktop\package.json" -Force
+node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir "$env:USERPROFILE\.dsh\profiles\desktop" install
 ```
 
-两种方式之后都**重启 DeepSeek Harness**。插件源码目录 `D:\deepseek\dsh-session-delete` 可以随时删除；本插件没有改动 DSH 内核、`node_modules` 里的任何第三方包或 `cordis.yml`。
+两种方式之后都**重启 DeepSeek Harness**。插件源码目录 `<插件目录>` 可以随时删除；本插件没有改动 DSH 内核、`node_modules` 里的任何第三方包或 `cordis.yml`。
 
 ---
 
@@ -102,12 +106,13 @@ node <runtime>\node.exe <runtime>\pnpm\bin\pnpm.mjs --dir 'C:\Users\Lenovo\.dsh\
 | [`lib/client.js`](lib/client.js) | 客户端半：手写 bundle，注册菜单行 + 确认对话框 + 删除调用 |
 | [`cordis.patch.yml`](cordis.patch.yml) | 把自己插进 profile 树 |
 | [`scripts/install-profile.mjs`](scripts/install-profile.mjs) | 接线 / `--revert` 反接线 |
+| [`scripts/publish-github.mjs`](scripts/publish-github.mjs) | 无 git 环境下用 REST API 发布（`--dry-run` / `--update`） |
 | [`test/delete-core.test.mjs`](test/delete-core.test.mjs) | 19 项：id 校验 / 定位 / 删除 / 围栏 |
 | [`test/host-route.test.mjs`](test/host-route.test.mjs) | 26 项：路由守卫 / 运行中保护 / 广播 / 纯 UUID id / live 空闲会话 |
 | [`test/client-bundle.test.mjs`](test/client-bundle.test.mjs) | 25 项：bundle 协议 / 两个 slot 注册 / 字典完整性 |
 
 ```powershell
-cd D:\deepseek\dsh-session-delete
+cd <插件目录>
 node test/delete-core.test.mjs
 node test/host-route.test.mjs
 node test/client-bundle.test.mjs
@@ -123,8 +128,12 @@ node test/client-bundle.test.mjs
 
 ## 9. 已知限制
 
-- 删除**不进回收站**，确认后无法恢复（这是你选的语义）。
+- 删除**不进回收站**，确认后无法恢复。
 - **工作区记账会残留一个 id**：`workspace.json` 里 `archivedSessionIds` / `sessionIds` 的该项不会被本插件重写（直接写内核存储域要踩 `validateStoredState` 不变式，代价大于收益）。后果：侧边栏不显示它；已被归档过的会话可能在归档视图里留下一条点不开的幽灵行；重启后 `sessionPath` 过滤会把它清掉。
 - 投影缓存 `~/.dsh/storages/session_projcache/sessions/<id>.json` 会残留（内核没有删除 API，且该行有 lifecycle-identity 守卫，不会误命中，只占几十 KB）。
-- 若该会话在**别处仍被打开**（例如另一个 DSH 进程持有日志句柄），Windows 上 `rm` 可能失败：此时接口返回 500 且目录未被部分提交的假象掩盖——按提示重试即可。
+- 若该会话在**别处仍被打开**（例如另一个 DSH 进程持有日志句柄），Windows 上 `rm` 可能失败：此时接口返回 500，不会用"部分删除"冒充成功——按提示重试即可。
 - 菜单行对「运行中」的对话不做置灰，而是点击确认后由宿主拒绝并给出原因。
+
+## 许可证
+
+MIT，见 [LICENSE](LICENSE)。

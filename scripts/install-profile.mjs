@@ -7,13 +7,14 @@
  *   node scripts/install-profile.mjs --revert [profileDir]
  */
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 const PLUGIN = 'dsh-session-delete'
 const args = process.argv.slice(2)
 const revert = args.includes('--revert')
 const positional = args.filter((value) => !value.startsWith('--'))
-const profileDir = positional[0] ?? 'C:\\Users\\Lenovo\\.dsh\\profiles\\desktop'
+const profileDir = positional[0] ?? path.join(os.homedir(), '.dsh', 'profiles', 'desktop')
 const pluginDir = positional[1] ?? path.resolve(import.meta.dirname, '..')
 
 const pkgPath = path.join(profileDir, 'package.json')

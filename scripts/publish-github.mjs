@@ -1,18 +1,27 @@
 /**
  * Publish this plugin to GitHub over the REST API.
  *
- * There is no git and no gh on this machine, so the whole publish is three
- * API calls per file plus one commit: blobs → tree → commit → ref. That yields
- * a single clean initial commit instead of one commit per uploaded file.
+ * Written for a machine without git or gh: one commit is assembled from
+ * blobs → tree → commit → ref, so the repository gets a single clean history
+ * instead of one commit per uploaded file.
  *
- * The token is read from a local file and never printed, never echoed into a
- * command line, and never written into the repository.
+ * Two GitHub behaviours are handled explicitly:
+ * - an empty repository has no git database, so blob/tree writes answer
+ *   `409 Git Repository is empty` until one commit exists — the first file is
+ *   therefore seeded through the contents API;
+ * - a non-empty repository is never overwritten unless `--update` is passed,
+ *   in which case the new commit is parented on the current `main`.
+ *
+ * The token is read from a local file (excluded by .gitignore) and is never
+ * printed, never passed on a command line, and never written into the repo.
  *
  * Usage:
  *   node scripts/publish-github.mjs --dry-run
  *   node scripts/publish-github.mjs --repo dsh-session-delete --description "..."
+ *   node scripts/publish-github.mjs --update
  *
- * Flags: --token <path>  --repo <name>  --description <text>  --private  --dry-run
+ * Flags: --token <path>  --repo <name>  --description <text>  --private
+ *        --dry-run  --update
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -38,11 +47,12 @@ const FILES = [
 ]
 
 const opts = {
-  token: 'D:\\deepseek\\.github-token.txt',
+  token: process.env.GITHUB_TOKEN_FILE ?? path.join(ROOT, '.github-token.txt'),
   repo: 'dsh-session-delete',
   description: 'DSH plugin: delete a conversation from the DeepSeek Harness sidebar.',
   private: false,
-  dryRun: false
+  dryRun: false,
+  update: false
 }
 const argv = process.argv.slice(2)
 for (let index = 0; index < argv.length; index += 1) {
@@ -52,6 +62,7 @@ for (let index = 0; index < argv.length; index += 1) {
   else if (flag === '--description') opts.description = argv[++index]
   else if (flag === '--private') opts.private = true
   else if (flag === '--dry-run') opts.dryRun = true
+  else if (flag === '--update') opts.update = true
   else throw new Error(`unknown argument: ${flag}`)
 }
 
@@ -123,7 +134,7 @@ if (opts.dryRun) {
   process.exit(0)
 }
 
-// --- create the repository (or adopt an existing, empty one) -----------------
+// --- create the repository, or adopt the existing one ------------------------
 try {
   await api(token, 'POST', '/user/repos', {
     name: opts.repo,
@@ -138,19 +149,25 @@ try {
 } catch (error) {
   if (error.status !== 422) throw error
   const existing = await api(token, 'GET', `/repos/${owner}/${opts.repo}`)
-  if ((existing.size ?? 0) > 0) {
-    throw new Error(`repository ${owner}/${opts.repo} already exists and is not empty — refusing to overwrite (${existing.size} KB)`)
+  if ((existing.size ?? 0) > 0 && !opts.update) {
+    throw new Error(`repository ${owner}/${opts.repo} already exists with content (${existing.size} KB) — pass --update to push a new commit onto it`)
   }
-  console.log(`\nrepository ${owner}/${opts.repo} already exists and is empty — filling it`)
+  console.log(`\nrepository ${owner}/${opts.repo} already exists — ${opts.update ? 'updating' : 'filling the empty repository'}`)
 }
 
-// --- an empty repository has no git database to hang objects on: GitHub
-// answers 409 "Git Repository is empty" for blob/tree writes until one commit
-// exists, so the first file goes in through the contents API.
-async function seedEmptyRepository() {
+/**
+ * The commit this push builds on.
+ *
+ * A repository with no `main` yet has no git database to hang blobs on (GitHub
+ * answers 409 "Git Repository is empty"), so its first commit is seeded through
+ * the contents API; an existing `main` simply supplies its head commit.
+ * @returns the parent commit sha.
+ */
+async function resolveParent() {
   try {
-    await api(token, 'GET', `/repos/${owner}/${opts.repo}/git/ref/heads/main`)
-    return undefined
+    const ref = await api(token, 'GET', `/repos/${owner}/${opts.repo}/git/ref/heads/main`)
+    console.log(`  building on main at ${String(ref.object.sha).slice(0, 7)}`)
+    return ref.object.sha
   } catch (error) {
     if (error.status !== 404 && error.status !== 409) throw error
   }
@@ -162,7 +179,7 @@ async function seedEmptyRepository() {
   console.log(`  seeded main with ${first.relative}`)
   return seeded.commit.sha
 }
-const parent = await seedEmptyRepository()
+const parent = await resolveParent()
 
 // --- blobs → tree → commit → ref ---------------------------------------------
 const entries = []
@@ -175,11 +192,14 @@ for (const item of plan) {
   console.log(`  uploaded ${item.relative}`)
 }
 
+const message = opts.update
+  ? 'Update published files\n\nRegenerated from the working tree.'
+  : 'Add dsh-session-delete: delete a conversation from the DSH sidebar\n\nHost route + client menu row, 70 self-checks, MIT.'
 const tree = await api(token, 'POST', `/repos/${owner}/${opts.repo}/git/trees`, { tree: entries })
 const commit = await api(token, 'POST', `/repos/${owner}/${opts.repo}/git/commits`, {
-  message: 'Add dsh-session-delete: delete a conversation from the DSH sidebar\n\nHost route + client menu row, 70 self-checks, MIT.',
+  message,
   tree: tree.sha,
-  parents: parent === undefined ? [] : [parent]
+  parents: [parent]
 })
 try {
   await api(token, 'POST', `/repos/${owner}/${opts.repo}/git/refs`, { ref: 'refs/heads/main', sha: commit.sha })
