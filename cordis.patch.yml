@@ -1,0 +1,10 @@
+# Insert dsh-session-delete: a host route that permanently removes one persisted
+# Session's directory from the DSH home, plus a client half that adds
+# "Delete conversation" to the sidebar Session "..." menu.
+#
+# The loader row specifier MUST equal the package.json `name` — the
+# client-modules scan matches the nearest manifest name against the Loader
+# specifier, and the browser boot row id is that same package name.
+- insert:
+    - id: session-delete
+      name: "dsh-session-delete"
