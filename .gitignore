@@ -1,0 +1,13 @@
+# Local install artifacts
+node_modules/
+tmp-delete-core-test/
+tmp-host-route-test/
+
+# Never commit credentials
+.github-token.txt
+*.token
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
